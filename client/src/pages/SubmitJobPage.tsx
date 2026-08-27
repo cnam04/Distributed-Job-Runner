@@ -33,7 +33,7 @@ export default function SubmitJobPage() {
 
               <div className="field">
                 <label className="label" htmlFor="repository">GitHub repository</label>
-                <div className="control">
+                <div className="control command-control">
                   <input
                     className="input"
                     id="repository"

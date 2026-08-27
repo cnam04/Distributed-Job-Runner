@@ -228,14 +228,7 @@ a {
   font-size: 0.9rem;
 }
 
-.input:hover,
-.input:focus {
-  border-color: #f58426;
-  box-shadow: 0 0 0 1px #f58426;
-}
-
 .help {
-  color: #747e77;
   font-size: 0.7rem;
 }
 
@@ -248,6 +241,8 @@ a {
   background: #001b36;
 }
 
+.path-control:hover,
+.command-control:hover,
 .path-control:focus-within,
 .command-control:focus-within {
   border-color: #f58426;
