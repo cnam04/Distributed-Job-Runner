@@ -103,9 +103,9 @@ sequence -> the order of the log messages, so that jobs can be easily sorted thr
 ```
 
 **The tech stack**
-_React:_ wide component support, easy to use with changing states
-_SQLite:_ Not much data is being stored, and the biggest priority here is just to have a fast and simple way to query and update state data by eliminating the need for a separate database server. Anything else would be overkill
-_Golang:_ The system will need to manage many concurrent operations like HTTP requests, job execution, log/health monitoring, and distributed workers. Goroutines make concurrent I/O heavy work simple and straightforward without sacrificing performance. 
+- _React:_ wide component support, easy to use with changing states
+- _SQLite:_ Not much data is being stored, and the biggest priority here is just to have a fast and simple way to query and update state data by eliminating the need for a separate database server. Anything else would be overkill
+- _Golang:_ The system will need to manage many concurrent operations like HTTP requests, job execution, log/health monitoring, and distributed workers. Goroutines make concurrent I/O heavy work simple and straightforward without sacrificing performance. 
 
 
 
