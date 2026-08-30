@@ -7,8 +7,13 @@ import (
 
 func main() {
 	repo := "https://github.com/cnam04/Restaurants-to-Pantries--Hackathon-Spring-2026-"
-	repoPath, _ := gitservice.GetRepo(repo)
+	currentJob := gitservice.NewJobRepo()
 
-	fmt.Println(repoPath)
+	err := currentJob.GetRepo(repo)
+	if err != nil {
+		panic(err)
+	}
 
+	fmt.Println(currentJob.RepoPath)
+	fmt.Println(currentJob.DirPath)
 }
