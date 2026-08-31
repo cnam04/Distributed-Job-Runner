@@ -1,3 +1,5 @@
+// methods for retrieving and managing repository source
+// code for a given job.
 package gitservice
 
 import (
@@ -60,8 +62,14 @@ func (job *JobRepo) GetRepo(link string) error {
 
 	// download the repo to test-jobs
 	jobDir, err := os.MkdirTemp("", "job-runner-*")
+	if err != nil {
+		return err
+	}
 	job.DirPath = jobDir + "/"
-	job.downloadRepo(url.String())
+	err = job.downloadRepo(url.String())
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
