@@ -66,9 +66,12 @@ func (job *JobRepo) GetRepo(link string) error {
 }
 
 // use this to get rid of the repo when done with it
-// TODO: Implement this
-func (job *JobRepo) CleanupRepo() {
-
+func (job *JobRepo) CleanupRepo() error {
+	err := os.RemoveAll(job.DirPath)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // example link: https://github.com/username/project-name
