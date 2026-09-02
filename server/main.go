@@ -1,9 +1,12 @@
 package main
 
 import (
+	dockerservice "distributed-job-runner/services/infrastructure/docker"
 	gitservice "distributed-job-runner/services/infrastructure/github"
 	"fmt"
 	"time"
+
+	"github.com/moby/moby/client"
 )
 
 // This is currently basic functional test code.
@@ -22,6 +25,18 @@ func main() {
 	fmt.Println(currentJob.RepoPath)
 	fmt.Println(currentJob.DirPath)
 
-	time.Sleep(30 * time.Second)
+	apiClient, err := client.New()
+	if err != nil {
+		panic(err)
+	}
+
+	dockerService, err := dockerservice.NewDockerService(currentJob, apiClient)
+	if err != nil {
+		panic(err)
+	}
+
+	dockerService.BuildImage(currentJob.RepoPath, "client/Dockerfile")
+
+	time.Sleep(15 * time.Second)
 
 }
