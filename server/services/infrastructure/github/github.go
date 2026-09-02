@@ -131,7 +131,6 @@ func (job *JobRepo) downloadRepo(url string) error {
 }
 
 // extract zipfile path
-// TODO: Add zip slip protection
 func (job *JobRepo) unzipRepo(file string) error {
 	r, err := zip.OpenReader(file)
 	if err != nil {
@@ -141,6 +140,10 @@ func (job *JobRepo) unzipRepo(file string) error {
 
 	// preserve the directory structure by creating necessary directories
 	for i, f := range r.File {
+		// protect from zip-slipping
+		if !filepath.IsLocal(f.Name) {
+			return fmt.Errorf("invalid zip path: %q", f.Name)
+		}
 		path := filepath.Join(job.DirPath, f.Name)
 		// collect the repo path within the temp directory
 		if i == 0 {
