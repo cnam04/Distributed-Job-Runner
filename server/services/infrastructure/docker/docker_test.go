@@ -25,10 +25,91 @@ func setupTestDockerService(t *testing.T) (repoPath string, dockerService Docker
 	return repoPath, dockerService
 }
 
-func TestDockerImageBuildandCleanup(t *testing.T) {
-	repoPath, dockerService := setupTestDockerService(t)
+func setupTestDockerServiceWithImage(t *testing.T) (repoPath string, dockerService DockerService) {
+	repoPath, dockerService = setupTestDockerService(t)
 	if err := dockerService.BuildImage(repoPath, "Dockerfile"); err != nil {
 		t.Fatal(err)
+	}
+	return repoPath, dockerService
+}
+
+func TestDockerImageBuildandCleanup(t *testing.T) {
+	_, dockerService := setupTestDockerServiceWithImage(t)
+	if err := dockerService.CleanupImage(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDockerContainerLifecycle(t *testing.T) {
+	_, dockerService := setupTestDockerServiceWithImage(t)
+	if err := dockerService.CreateContainer(); err != nil {
+		t.Fatal(err)
+	}
+	if err := dockerService.StartContainers(); err != nil {
+		t.Fatal(err)
+	}
+	if err := dockerService.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if err := dockerService.RemoveContainer(); err != nil {
+		t.Fatal(err)
+	}
+	if len(dockerService.containerIDs) != 0 {
+		t.Fatal("removed container ID was retained")
+	}
+	if err := dockerService.CleanupImage(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDockerContainerCreateNoImage(t *testing.T) {
+	_, dockerService := setupTestDockerService(t)
+	if err := dockerService.CreateContainer(); err != nil {
+		expected := "No image specified to create container from. Image may not have been created."
+		if err.Error() != expected {
+			t.Errorf("expected error message %q, got %q", expected, err.Error())
+		}
+	}
+}
+
+func TestMultipleContainerLifecycle(t *testing.T) {
+	_, dockerService := setupTestDockerServiceWithImage(t)
+
+	for range 3 {
+		if err := dockerService.CreateContainer(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Start every container before following its output.
+	if err := dockerService.StartContainers(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Stream each container's logs concurrently and retain any errors.
+	logErrors := make(chan error, len(dockerService.containerIDs))
+	for i := range dockerService.containerIDs {
+		go func(index int) {
+			logErrors <- dockerService.LogOutput(index)
+		}(i)
+	}
+
+	// Wait for all containers, then join every logging goroutine before cleanup.
+	waitErr := dockerService.Wait()
+	for range dockerService.containerIDs {
+		if err := <-logErrors; err != nil {
+			t.Errorf("reading container logs: %v", err)
+		}
+	}
+	if waitErr != nil {
+		t.Fatal(waitErr)
+	}
+
+	if err := dockerService.RemoveContainer(); err != nil {
+		t.Fatal(err)
+	}
+	if len(dockerService.containerIDs) != 0 {
+		t.Fatal("removed container IDs were retained")
 	}
 	if err := dockerService.CleanupImage(); err != nil {
 		t.Fatal(err)
