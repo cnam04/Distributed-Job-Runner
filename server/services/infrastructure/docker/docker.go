@@ -17,11 +17,20 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/moby/go-archive"
+	"github.com/moby/moby/api/pkg/authconfig"
 	"github.com/moby/moby/api/types/jsonstream"
+	"github.com/moby/moby/api/types/registry"
 	"github.com/moby/moby/client"
+)
+
+const (
+	ghcrRepository    = "ghcr.io/cnam04/distributed-job-runner"
+	ghcrWriteTokenEnv = "READ_WRITE_GHCR_TOKEN"
+	ghcrUsername      = "cnam04"
 )
 
 // TODO: Job repo shouldn't be tied to the docker service. It will eventually not be needed becasue the repo image
@@ -30,6 +39,7 @@ type DockerService struct {
 	JobRepo      gitservice.JobRepo
 	ApiClient    *client.Client
 	imageRef     string
+	imagePushed  bool
 	containerIDs []string
 }
 
@@ -82,7 +92,8 @@ func (dockerService *DockerService) BuildImage(repoPath string, dockerfilePath s
 	ctx := context.Background()
 
 	// Set image build options for docker image. (Will be fleshed out later.)
-	imageTag := fmt.Sprintf("distributed-job-runner-image-%d", time.Now().UnixNano())
+	// TODO: Append Job ID instead of nanosecond
+	imageTag := fmt.Sprintf("%s:%d", ghcrRepository, time.Now().UnixNano())
 	opts := client.ImageBuildOptions{
 		Dockerfile: dockerfilePath,
 		Remove:     true,
@@ -114,6 +125,85 @@ func (dockerService *DockerService) BuildImage(repoPath string, dockerfilePath s
 	return nil
 }
 
+// PushImage pushes the built image to GHCR so workers can pull it.
+func (dockerService *DockerService) PushImage() error {
+	if dockerService.imageRef == "" {
+		return errors.New("no image specified to push")
+	}
+
+	ctx := context.Background()
+	registryToken, err := ghcrToken()
+	if err != nil {
+		return err
+	}
+
+	// Create the auth credential to pass into ImagePush
+	encodedAuth, err := authconfig.Encode(registry.AuthConfig{
+		Username:      ghcrUsername,
+		Password:      registryToken,
+		ServerAddress: "ghcr.io",
+	})
+	if err != nil {
+		return fmt.Errorf("encode registry credentials: %w", err)
+	}
+
+	// API call
+	options := client.ImagePushOptions{
+		RegistryAuth: encodedAuth,
+	}
+	res, err := dockerService.ApiClient.ImagePush(ctx, dockerService.imageRef, options)
+	if err != nil {
+		return fmt.Errorf("start image push: %w", err)
+	}
+
+	for message, err := range res.JSONMessages(ctx) {
+		if err != nil {
+			return fmt.Errorf("push image: %w", err)
+		}
+		if message.Error != nil {
+			return fmt.Errorf("push image: %w", message.Error)
+		}
+		if message.Status != "" {
+			if message.ID != "" {
+				fmt.Printf("PUSH %s: %s\n", message.ID, message.Status)
+			} else {
+				fmt.Printf("PUSH: %s\n", message.Status)
+			}
+		}
+	}
+	dockerService.imagePushed = true
+
+	return nil
+}
+
+// TODO: Remove this and load env vars outside of the application via docker compose
+func ghcrToken() (string, error) {
+	if token := os.Getenv(ghcrWriteTokenEnv); token != "" {
+		return token, nil
+	}
+	return readEnvValue(filepath.Join("..", "..", "..", "..", ".env"), ghcrWriteTokenEnv)
+}
+
+func readEnvValue(path string, name string) (string, error) {
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+
+	for line := range strings.SplitSeq(string(contents), "\n") {
+		key, value, found := strings.Cut(line, "=")
+		if found && strings.TrimSpace(key) == name {
+			value = strings.Trim(strings.TrimSpace(value), `"'`)
+			if value == "" {
+				break
+			}
+			return value, nil
+		}
+	}
+
+	return "", fmt.Errorf("%s is not set", name)
+}
+
 // TODO: Add periodic build cache pruning as a background task.
 // Build cache stays left over even if an image is deleted.
 
@@ -129,6 +219,16 @@ func (dockerService *DockerService) CleanupImage() error {
 		return err
 	}
 	fmt.Printf("DELETE IMAGE RESULT: %s\n", resultJSON)
+	if dockerService.imagePushed {
+		registryToken, err := ghcrToken()
+		if err != nil {
+			return err
+		}
+		err = gitservice.RemoveImageRegistry(dockerService.imageRef, registryToken)
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -142,7 +242,7 @@ func (dockerService *DockerService) CreateContainer() error {
 	}
 
 	ctx := context.Background()
-	containerTag := fmt.Sprintf("%v-CONTAINER-%d", dockerService.imageRef, time.Now().UnixNano())
+	containerTag := fmt.Sprintf("distributed-job-runner-container-%d", time.Now().UnixNano())
 	opts := client.ContainerCreateOptions{
 		Image: dockerService.imageRef,
 		Name:  containerTag,

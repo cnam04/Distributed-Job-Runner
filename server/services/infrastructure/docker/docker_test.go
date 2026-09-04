@@ -40,6 +40,16 @@ func TestDockerImageBuildandCleanup(t *testing.T) {
 	}
 }
 
+func TestDockerImageBuildPushCleanup(t *testing.T) {
+	_, dockerService := setupTestDockerServiceWithImage(t)
+	if err := dockerService.PushImage(); err != nil {
+		t.Fatal(err)
+	}
+	if err := dockerService.CleanupImage(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDockerContainerLifecycle(t *testing.T) {
 	_, dockerService := setupTestDockerServiceWithImage(t)
 	if err := dockerService.CreateContainer(); err != nil {
@@ -128,5 +138,20 @@ func TestDockerImageBuildFailure(t *testing.T) {
 	}
 	if dockerService.imageRef != "" {
 		t.Fatal("failed build assigned an image ID")
+	}
+}
+
+func TestReadEnvValue(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(path, []byte("OTHER=value\nREAD_WRITE_GHCR_TOKEN='secret'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	value, err := readEnvValue(path, "READ_WRITE_GHCR_TOKEN")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value != "secret" {
+		t.Fatalf("expected %q, got %q", "secret", value)
 	}
 }

@@ -2,9 +2,15 @@ package gitservice
 
 import (
 	"archive/zip"
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/google/go-github/v90/github"
 )
 
 func TestParseGithubLink(t *testing.T) {
@@ -69,5 +75,32 @@ func TestUnzipRepoRejectsZipSlip(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "escaped.txt")); !os.IsNotExist(err) {
 		t.Fatalf("expected no file outside extraction directory, got %v", err)
+	}
+}
+
+func TestRemoveImageRegistry(t *testing.T) {
+	deleted := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/user/packages/container/distributed-job-runner/versions":
+			io.WriteString(w, `[{"id":42,"metadata":{"container":{"tags":["123"]}}}]`)
+		case r.Method == http.MethodDelete && r.URL.Path == "/user/packages/container/distributed-job-runner/versions/42":
+			deleted = true
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client, err := github.NewClient(github.WithHTTPClient(server.Client()), github.WithURLs(&server.URL, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := removeImageRegistry(context.Background(), client, "ghcr.io/cnam04/distributed-job-runner:123"); err != nil {
+		t.Fatal(err)
+	}
+	if !deleted {
+		t.Fatal("expected matching package version to be deleted")
 	}
 }

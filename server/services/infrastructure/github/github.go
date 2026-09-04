@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/google/go-github/v90/github"
@@ -187,4 +188,37 @@ func (job *JobRepo) unzipRepo(file string) error {
 	os.Remove(file)
 
 	return nil
+}
+
+// RemoveImageRegistry removes the GHCR package version carrying tag.
+func RemoveImageRegistry(tag string, token string) error {
+	client, err := github.NewClient(github.WithAuthToken(token))
+	if err != nil {
+		return err
+	}
+
+	return removeImageRegistry(context.Background(), client, tag)
+}
+
+func removeImageRegistry(ctx context.Context, client *github.Client, imageRef string) error {
+	tag := imageRef[strings.LastIndexByte(imageRef, ':')+1:]
+	if tag == "" {
+		return errors.New("image tag is empty")
+	}
+
+	for version, err := range client.Users.ListPackageVersionsIter(ctx, "container", "distributed-job-runner", nil) {
+		if err != nil {
+			return fmt.Errorf("list package versions: %w", err)
+		}
+		metadata, ok := version.GetMetadata()
+		if !ok || !slices.Contains(metadata.GetContainer().GetTags(), tag) {
+			continue
+		}
+		if _, err := client.Users.PackageDeleteVersion(ctx, "", "container", "distributed-job-runner", version.GetID()); err != nil {
+			return fmt.Errorf("delete package version: %w", err)
+		}
+		return nil
+	}
+
+	return fmt.Errorf("image tag %q not found in registry", tag)
 }
