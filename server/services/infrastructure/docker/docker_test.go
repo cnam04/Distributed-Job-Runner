@@ -126,7 +126,7 @@ func TestDockerImageBuildFailure(t *testing.T) {
 	if err := dockerService.BuildImage(repoPath, "Dockerfile"); err == nil {
 		t.Fatal("expected build error")
 	}
-	if dockerService.imageID != "" {
+	if dockerService.imageRef != "" {
 		t.Fatal("failed build assigned an image ID")
 	}
 }

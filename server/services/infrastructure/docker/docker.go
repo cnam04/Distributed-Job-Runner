@@ -24,20 +24,22 @@ import (
 	"github.com/moby/moby/client"
 )
 
+// TODO: Job repo shouldn't be tied to the docker service. It will eventually not be needed becasue the repo image
+// will be pulled down to the worker
 type DockerService struct {
 	JobRepo      gitservice.JobRepo
 	ApiClient    *client.Client
-	imageID      string
+	imageRef     string
 	containerIDs []string
 }
 
 // Creates new dockerservice object that will interact with the repo
 func NewDockerService(job gitservice.JobRepo, ApiClient *client.Client) (dockerService DockerService, err error) {
-	ids := make([]string, 0, 0)
+	ids := make([]string, 0)
 	return DockerService{
 		JobRepo:      job,
 		ApiClient:    ApiClient,
-		imageID:      "",
+		imageRef:     "",
 		containerIDs: ids,
 	}, nil
 }
@@ -107,7 +109,7 @@ func (dockerService *DockerService) BuildImage(repoPath string, dockerfilePath s
 		}
 		fmt.Print(message.Stream)
 	}
-	dockerService.imageID = imageTag
+	dockerService.imageRef = imageTag
 
 	return nil
 }
@@ -118,7 +120,7 @@ func (dockerService *DockerService) BuildImage(repoPath string, dockerfilePath s
 // remove the docker image for the given job
 func (dockerService *DockerService) CleanupImage() error {
 	ctx := context.Background()
-	removeResult, err := dockerService.ApiClient.ImageRemove(ctx, dockerService.imageID, client.ImageRemoveOptions{})
+	removeResult, err := dockerService.ApiClient.ImageRemove(ctx, dockerService.imageRef, client.ImageRemoveOptions{})
 	if err != nil {
 		return err
 	}
@@ -135,14 +137,14 @@ func (dockerService *DockerService) CleanupImage() error {
 // once we are distributing jobs across multiple containers
 func (dockerService *DockerService) CreateContainer() error {
 	// if imageID doesn't exist, that means this method is being called while a working image doesn't exist
-	if dockerService.imageID == "" {
+	if dockerService.imageRef == "" {
 		return errors.New("No image specified to create container from. Image may not have been created.")
 	}
 
 	ctx := context.Background()
-	containerTag := fmt.Sprintf("%v-CONTAINER-%d", dockerService.imageID, time.Now().UnixNano())
+	containerTag := fmt.Sprintf("%v-CONTAINER-%d", dockerService.imageRef, time.Now().UnixNano())
 	opts := client.ContainerCreateOptions{
-		Image: dockerService.imageID,
+		Image: dockerService.imageRef,
 		Name:  containerTag,
 	}
 	result, err := dockerService.ApiClient.ContainerCreate(ctx, opts)
