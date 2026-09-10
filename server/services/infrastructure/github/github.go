@@ -190,6 +190,7 @@ func (job *JobRepo) unzipRepo(file string) error {
 	return nil
 }
 
+// TODO: Merge this into one so we can pass context when doing calls using the api
 // RemoveImageRegistry removes the GHCR package version carrying tag.
 func RemoveImageRegistry(tag string, token string) error {
 	client, err := github.NewClient(github.WithAuthToken(token))

@@ -33,33 +33,88 @@ func setupTestDockerServiceWithImage(t *testing.T) (repoPath string, dockerServi
 	return repoPath, dockerService
 }
 
-func TestDockerImageBuildandCleanup(t *testing.T) {
+func TestDockerImageBuildAndRemoveLocal(t *testing.T) {
 	_, dockerService := setupTestDockerServiceWithImage(t)
-	if err := dockerService.CleanupImage(); err != nil {
+	if err := dockerService.RemoveLocalImage(); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestDockerImageBuildPushCleanup(t *testing.T) {
+func TestDockerImageBuildPushAndRemove(t *testing.T) {
 	_, dockerService := setupTestDockerServiceWithImage(t)
 	if err := dockerService.PushImage(); err != nil {
 		t.Fatal(err)
 	}
-	if err := dockerService.CleanupImage(); err != nil {
+	if err := dockerService.RemoveLocalImage(); err != nil {
+		t.Fatal(err)
+	}
+	if err := dockerService.RemoveImageFromRegistry(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDockerImageBuildPushPullCleanup(t *testing.T) {
+	_, dockerService := setupTestDockerServiceWithImage(t)
+	if err := dockerService.PushImage(); err != nil {
+		t.Fatal(err)
+	}
+	if err := dockerService.RemoveLocalImage(); err != nil {
+		t.Fatal(err)
+	}
+	if err := dockerService.PullImage(); err != nil {
+		t.Fatal(err)
+	}
+	if err := dockerService.RemoveLocalImage(); err != nil {
+		t.Fatal(err)
+	}
+	if err := dockerService.RemoveImageFromRegistry(); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestDockerContainerLifecycle(t *testing.T) {
+	// ORCHESTRATOR PORTION
+	// ---------------------------
 	_, dockerService := setupTestDockerServiceWithImage(t)
+	if err := dockerService.PushImage(); err != nil {
+		t.Fatal(err)
+	}
+	// ---------------------------
+
+	// WORKER PORTION
+	// ---------------------------
+	// Simulate the job being run on a new server without the image
+	if err := dockerService.RemoveLocalImage(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := dockerService.PullImage(); err != nil {
+		t.Fatal(err)
+	}
 	if err := dockerService.CreateContainer(); err != nil {
 		t.Fatal(err)
 	}
+	// Run the job
 	if err := dockerService.StartContainers(); err != nil {
 		t.Fatal(err)
 	}
-	if err := dockerService.Wait(); err != nil {
-		t.Fatal(err)
+	// Stream each container's logs concurrently and retain any errors.
+	logErrors := make(chan error, len(dockerService.containerIDs))
+	for i := range dockerService.containerIDs {
+		go func(index int) {
+			logErrors <- dockerService.LogOutput(index)
+		}(i)
+	}
+
+	// Wait for all containers, then join every logging goroutine before cleanup.
+	waitErr := dockerService.Wait()
+	for range dockerService.containerIDs {
+		if err := <-logErrors; err != nil {
+			t.Errorf("reading container logs: %v", err)
+		}
+	}
+	if waitErr != nil {
+		t.Fatal(waitErr)
 	}
 	if err := dockerService.RemoveContainer(); err != nil {
 		t.Fatal(err)
@@ -67,9 +122,18 @@ func TestDockerContainerLifecycle(t *testing.T) {
 	if len(dockerService.containerIDs) != 0 {
 		t.Fatal("removed container ID was retained")
 	}
-	if err := dockerService.CleanupImage(); err != nil {
+	if err := dockerService.RemoveLocalImage(); err != nil {
 		t.Fatal(err)
 	}
+	// ---------------------------
+
+	// ORCHESTRATOR PORTION
+	// ---------------------------
+	if err := dockerService.RemoveImageFromRegistry(); err != nil {
+		t.Fatal(err)
+	}
+	// ---------------------------
+
 }
 
 func TestDockerContainerCreateNoImage(t *testing.T) {
@@ -83,7 +147,23 @@ func TestDockerContainerCreateNoImage(t *testing.T) {
 }
 
 func TestMultipleContainerLifecycle(t *testing.T) {
+	// ORCHESTRATOR PORTION
+	// ---------------------------
 	_, dockerService := setupTestDockerServiceWithImage(t)
+	if err := dockerService.PushImage(); err != nil {
+		t.Fatal(err)
+	}
+	// ---------------------------
+
+	// WORKER PORTION
+	// ---------------------------
+	// Simulate the job being run on a new server without the image
+	if err := dockerService.RemoveLocalImage(); err != nil {
+		t.Fatal(err)
+	}
+	if err := dockerService.PullImage(); err != nil {
+		t.Fatal(err)
+	}
 
 	for range 3 {
 		if err := dockerService.CreateContainer(); err != nil {
@@ -121,9 +201,17 @@ func TestMultipleContainerLifecycle(t *testing.T) {
 	if len(dockerService.containerIDs) != 0 {
 		t.Fatal("removed container IDs were retained")
 	}
-	if err := dockerService.CleanupImage(); err != nil {
+	if err := dockerService.RemoveLocalImage(); err != nil {
 		t.Fatal(err)
 	}
+	// ---------------------------
+
+	// ORCHESTRATOR PORTION
+	// ---------------------------
+	if err := dockerService.RemoveImageFromRegistry(); err != nil {
+		t.Fatal(err)
+	}
+	// ---------------------------
 }
 
 func TestDockerImageBuildFailure(t *testing.T) {

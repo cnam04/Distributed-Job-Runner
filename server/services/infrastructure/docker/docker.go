@@ -30,6 +30,7 @@ import (
 const (
 	ghcrRepository    = "ghcr.io/cnam04/distributed-job-runner"
 	ghcrWriteTokenEnv = "READ_WRITE_GHCR_TOKEN"
+	ghcrReadTokenEnv  = "READ_ONLY_GHCR_TOKEN"
 	ghcrUsername      = "cnam04"
 )
 
@@ -39,7 +40,6 @@ type DockerService struct {
 	JobRepo      gitservice.JobRepo
 	ApiClient    *client.Client
 	imageRef     string
-	imagePushed  bool
 	containerIDs []string
 }
 
@@ -132,7 +132,7 @@ func (dockerService *DockerService) PushImage() error {
 	}
 
 	ctx := context.Background()
-	registryToken, err := ghcrToken()
+	registryToken, err := ghcrToken(false)
 	if err != nil {
 		return err
 	}
@@ -171,17 +171,70 @@ func (dockerService *DockerService) PushImage() error {
 			}
 		}
 	}
-	dockerService.imagePushed = true
+	return nil
+}
+
+// Use the image reference tag to pull the image for the current job from the GHCR
+// If the worker doesn't have the same image reference tag as the one sent by the orchestrator for the current job,
+// pull the image from the registry
+func (dockerService *DockerService) PullImage() error {
+	if dockerService.imageRef == "" {
+		return errors.New("no image specified to pull")
+	}
+
+	ctx := context.Background()
+	registryToken, err := ghcrToken(true)
+	if err != nil {
+		return err
+	}
+
+	encodedAuth, err := authconfig.Encode(registry.AuthConfig{
+		Username:      ghcrUsername,
+		Password:      registryToken,
+		ServerAddress: "ghcr.io",
+	})
+	if err != nil {
+		return fmt.Errorf("encode registry credentials: %w", err)
+	}
+
+	options := client.ImagePullOptions{
+		RegistryAuth: encodedAuth,
+	}
+
+	res, err := dockerService.ApiClient.ImagePull(ctx, dockerService.imageRef, options)
+	if err != nil {
+		return fmt.Errorf("start image pull: %w", err)
+	}
+
+	for message, err := range res.JSONMessages(ctx) {
+		if err != nil {
+			return fmt.Errorf("pull image: %w", err)
+		}
+		if message.Error != nil {
+			return fmt.Errorf("pull image: %w", message.Error)
+		}
+		if message.Status != "" {
+			if message.ID != "" {
+				fmt.Printf("PULL %s: %s\n", message.ID, message.Status)
+			} else {
+				fmt.Printf("PULL: %s\n", message.Status)
+			}
+		}
+	}
 
 	return nil
 }
 
 // TODO: Remove this and load env vars outside of the application via docker compose
-func ghcrToken() (string, error) {
-	if token := os.Getenv(ghcrWriteTokenEnv); token != "" {
+func ghcrToken(readOnly bool) (string, error) {
+	tokenEnv := ghcrWriteTokenEnv
+	if readOnly {
+		tokenEnv = ghcrReadTokenEnv
+	}
+	if token := os.Getenv(tokenEnv); token != "" {
 		return token, nil
 	}
-	return readEnvValue(filepath.Join("..", "..", "..", "..", ".env"), ghcrWriteTokenEnv)
+	return readEnvValue(filepath.Join("..", "..", "..", "..", ".env"), tokenEnv)
 }
 
 func readEnvValue(path string, name string) (string, error) {
@@ -207,8 +260,8 @@ func readEnvValue(path string, name string) (string, error) {
 // TODO: Add periodic build cache pruning as a background task.
 // Build cache stays left over even if an image is deleted.
 
-// remove the docker image for the given job
-func (dockerService *DockerService) CleanupImage() error {
+// RemoveLocalImage removes the job image from the current Docker host
+func (dockerService *DockerService) RemoveLocalImage() error {
 	ctx := context.Background()
 	removeResult, err := dockerService.ApiClient.ImageRemove(ctx, dockerService.imageRef, client.ImageRemoveOptions{})
 	if err != nil {
@@ -219,15 +272,17 @@ func (dockerService *DockerService) CleanupImage() error {
 		return err
 	}
 	fmt.Printf("DELETE IMAGE RESULT: %s\n", resultJSON)
-	if dockerService.imagePushed {
-		registryToken, err := ghcrToken()
-		if err != nil {
-			return err
-		}
-		err = gitservice.RemoveImageRegistry(dockerService.imageRef, registryToken)
-		if err != nil {
-			return err
-		}
+	return nil
+}
+
+// RemoveImageFromRegistry removes the job image from GHCR
+func (dockerService *DockerService) RemoveImageFromRegistry() error {
+	registryToken, err := ghcrToken(false)
+	if err != nil {
+		return err
+	}
+	if err := gitservice.RemoveImageRegistry(dockerService.imageRef, registryToken); err != nil {
+		return err
 	}
 	return nil
 }
