@@ -1,6 +1,33 @@
+import { useState, type FormEvent } from 'react'
 import SiteHeader from '../components/SiteHeader.tsx'
 
 export default function SubmitJobPage() {
+  const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError('')
+    setSubmitting(true)
+    const data = new FormData(event.currentTarget)
+    try {
+      const response = await fetch('/api/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repoUrl: data.get('repository'),
+          dockerfilePath: data.get('dockerfile'),
+        }),
+      })
+      if (!response.ok) throw new Error((await response.text()) || 'Could not submit job')
+      const job = await response.json() as { id: string }
+      window.location.assign(`/jobs/${encodeURIComponent(job.id)}`)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Could not submit job')
+      setSubmitting(false)
+    }
+  }
+
   return (
     <div className="app-shell">
       <SiteHeader current="submit" />
@@ -15,20 +42,20 @@ export default function SubmitJobPage() {
             </p>
 
             <div className="process-list" aria-label="Job process">
-              <div><span>01</span><p><strong>Submit</strong>Your repository and run command</p></div>
+              <div><span>01</span><p><strong>Submit</strong>Your repository and Dockerfile</p></div>
               <div><span>02</span><p><strong>Build</strong>A clean container on the server</p></div>
-              <div><span>03</span><p><strong>Monitor</strong>Status and output in one place</p></div>
+              <div><span>03</span><p><strong>Monitor</strong>Status in the dashboard</p></div>
             </div>
           </section>
 
           <section className="column is-7">
-            <form className="box job-form" action="/jobs/demo-job-42" method="get">
+            <form className="box job-form" onSubmit={submit}>
               <div className="form-heading">
                 <div>
                   <p className="eyebrow">New workload</p>
                   <h2 className="title is-3">Submit a job</h2>
                 </div>
-                <span className="draft-badge">Draft mode</span>
+                <span className="draft-badge">Demo mode</span>
               </div>
 
               <div className="field">
@@ -39,7 +66,7 @@ export default function SubmitJobPage() {
                     id="repository"
                     name="repository"
                     type="url"
-                    defaultValue="https://github.com/student/image-preprocessor"
+                    defaultValue="https://github.com/cnam04/test_repo"
                     required
                   />
                 </div>
@@ -61,27 +88,14 @@ export default function SubmitJobPage() {
                 </div>
               </div>
 
-              <div className="field">
-                <label className="label" htmlFor="command">Run command</label>
-                <div className="control command-control">
-                  <span aria-hidden="true">$</span>
-                  <input
-                    className="input"
-                    id="command"
-                    name="command"
-                    type="text"
-                    defaultValue="python process.py /data/input"
-                    required
-                  />
-                </div>
-              </div>
-
               <div className="submission-note">
                 <span className="note-dot" aria-hidden="true" />
-                <p><strong>Prototype submission</strong>This form opens a dashboard with hardcoded job data.</p>
+                <p><strong>Remote execution</strong>The coordinator builds this repository and sends it to the configured worker.</p>
               </div>
 
-              <button className="button submit-button is-fullwidth" type="submit">
+              {error && <p className="help is-danger mb-4" role="alert">{error}</p>}
+
+              <button className={`button submit-button is-fullwidth${submitting ? ' is-loading' : ''}`} type="submit" disabled={submitting}>
                 Submit job <span aria-hidden="true">-&gt;</span>
               </button>
             </form>

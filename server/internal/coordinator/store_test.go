@@ -41,7 +41,13 @@ func TestMemoryJobStoreLifecycleAndCopies(t *testing.T) {
 	if err := s.UpdateStatus(ctx, want.ID, job.StatusRunning); err != nil {
 		t.Fatal(err)
 	}
-	want.ImageRef, want.Status = coordinatorImage(want.ID), job.StatusRunning
+	if err := s.AppendLog(ctx, want.ID, "first line"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendLog(ctx, want.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	want.ImageRef, want.Status, want.Logs = coordinatorImage(want.ID), job.StatusRunning, "first line\n\n"
 	updated, err := s.Get(ctx, want.ID)
 	if err != nil || *updated != want {
 		t.Errorf("updated job = %+v, %v; want %+v", updated, err, want)
@@ -75,6 +81,7 @@ func TestMemoryJobStoreMissingAndCanceled(t *testing.T) {
 		}},
 		{"status", func(ctx context.Context, id string) error { return s.UpdateStatus(ctx, id, job.StatusFailed) }},
 		{"imageRef", func(ctx context.Context, id string) error { return s.SetImageRef(ctx, id, "changed") }},
+		{"log", func(ctx context.Context, id string) error { return s.AppendLog(ctx, id, "changed") }},
 	}
 	for _, op := range ops {
 		t.Run(op.name, func(t *testing.T) {

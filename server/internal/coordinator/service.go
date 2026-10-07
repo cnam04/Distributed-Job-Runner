@@ -27,17 +27,19 @@ type JobStore interface {
 	Create(ctx context.Context, j *job.Job) error
 	UpdateStatus(ctx context.Context, jobID string, status job.Status) error
 	SetImageRef(ctx context.Context, jobID, imageRef string) error
+	AppendLog(ctx context.Context, jobID, line string) error
 	Get(ctx context.Context, jobID string) (*job.Job, error)
 }
 
 type Service struct {
-	NewRepo func() RepoFetcher
-	Images  ImageBuilder
-	Workers WorkerClient
-	Jobs    JobStore
+	NewRepo    func() RepoFetcher
+	Images     ImageBuilder
+	Workers    WorkerClient
+	Jobs       JobStore
+	RunContext context.Context
 }
 
-func (s *Service) Run(ctx context.Context, j *job.Job) (err error) {
+func (s *Service) create(ctx context.Context, j *job.Job) error {
 	if strings.TrimSpace(j.ID) == "" || strings.TrimSpace(j.RepoURL) == "" || strings.TrimSpace(j.DockerfilePath) == "" {
 		return errors.New("id, repoUrl, and dockerfilePath are required")
 	}
@@ -49,6 +51,34 @@ func (s *Service) Run(ctx context.Context, j *job.Job) (err error) {
 		return err
 	}
 	log.Printf("Job queued: id=%s", j.ID)
+	return nil
+}
+
+func (s *Service) Submit(ctx context.Context, j *job.Job) error {
+	if err := s.create(ctx, j); err != nil {
+		return err
+	}
+	runCtx := s.RunContext
+	if runCtx == nil {
+		runCtx = context.Background()
+	}
+	backgroundJob := *j
+	go func() {
+		if err := s.execute(runCtx, &backgroundJob); err != nil {
+			log.Printf("Job failed: id=%s error=%v", backgroundJob.ID, err)
+		}
+	}()
+	return nil
+}
+
+func (s *Service) Run(ctx context.Context, j *job.Job) error {
+	if err := s.create(ctx, j); err != nil {
+		return err
+	}
+	return s.execute(ctx, j)
+}
+
+func (s *Service) execute(ctx context.Context, j *job.Job) (err error) {
 	// Each job owns its source directory, even when requests run concurrently.
 	repo := s.NewRepo()
 	defer func() {

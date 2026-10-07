@@ -62,6 +62,22 @@ func (s *MemoryJobStore) SetImageRef(ctx context.Context, jobID, imageRef string
 	return nil
 }
 
+func (s *MemoryJobStore) AppendLog(ctx context.Context, jobID, line string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	j, exists := s.jobs[jobID]
+	if !exists {
+		return ErrJobNotFound
+	}
+	// ponytail: one combined string is enough for demo logs; chunk storage if volume matters.
+	j.Logs += line + "\n"
+	s.jobs[jobID] = j
+	return nil
+}
+
 func (s *MemoryJobStore) Get(ctx context.Context, jobID string) (*job.Job, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

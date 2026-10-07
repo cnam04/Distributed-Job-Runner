@@ -34,7 +34,7 @@ func NewHandler(service *coordinator.Service) http.Handler {
 			return
 		}
 		j := job.Job{ID: rand.Text(), RepoURL: request.RepoURL, DockerfilePath: request.DockerfilePath}
-		err = service.Run(r.Context(), &j)
+		err = service.Submit(r.Context(), &j)
 		status := http.StatusCreated
 		message := ""
 		if err != nil {

@@ -105,11 +105,10 @@ func TestHTTPJobLifecycle(t *testing.T) {
 	for _, test := range []struct {
 		name       string
 		workerErr  error
-		wantHTTP   int
 		wantStatus job.Status
 	}{
-		{"completed", nil, http.StatusCreated, job.StatusCompleted},
-		{"worker failure", errors.New("container exited with status 17"), http.StatusInternalServerError, job.StatusFailed},
+		{"completed", nil, job.StatusCompleted},
+		{"worker failure", errors.New("container exited with status 17"), job.StatusFailed},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -205,10 +204,11 @@ func TestHTTPJobLifecycle(t *testing.T) {
 			}))
 			defer workerServer.Close()
 			service := &coordinator.Service{
-				NewRepo: func() coordinator.RepoFetcher { return repo },
-				Images:  builder,
-				Workers: &workerhttp.Client{URL: workerServer.URL, HTTP: workerServer.Client()},
-				Jobs:    store,
+				NewRepo:    func() coordinator.RepoFetcher { return repo },
+				Images:     builder,
+				Workers:    &workerhttp.Client{URL: workerServer.URL, HTTP: workerServer.Client(), Log: store.AppendLog},
+				Jobs:       store,
+				RunContext: context.WithValue(ctx, contextKey{}, "coordinator"),
 			}
 			handler := coordinatorhttp.NewHandler(service)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -229,7 +229,7 @@ func TestHTTPJobLifecycle(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if response.StatusCode != test.wantHTTP || response.Header.Get("Content-Type") != "application/json" {
+			if response.StatusCode != http.StatusCreated || response.Header.Get("Content-Type") != "application/json" {
 				t.Fatalf("POST response = %s, headers=%v, body=%s", response.Status, response.Header, body)
 			}
 			var created struct {
@@ -239,21 +239,18 @@ func TestHTTPJobLifecycle(t *testing.T) {
 			if err := json.Unmarshal(body, &created); err != nil {
 				t.Fatal(err)
 			}
-			if created.ID == "" || created.RepoURL != "https://github.com/example/project" || created.DockerfilePath != "Dockerfile" || created.ImageRef != imageRef || created.Status != test.wantStatus {
+			if created.ID == "" || created.RepoURL != "https://github.com/example/project" || created.DockerfilePath != "Dockerfile" || created.ImageRef != "" || created.Status != job.StatusQueued {
 				t.Fatalf("created job = %+v", created)
 			}
-			if test.workerErr == nil && created.Error != "" {
-				t.Errorf("successful job error = %q", created.Error)
-			}
-			if test.workerErr != nil && (!strings.Contains(created.Error, "worker returned 500 Internal Server Error") || !strings.Contains(created.Error, test.workerErr.Error())) {
-				t.Errorf("worker failure not propagated to coordinator: %q", created.Error)
+			if created.Error != "" {
+				t.Errorf("queued job error = %q", created.Error)
 			}
 			var fields map[string]json.RawMessage
 			if err := json.Unmarshal(body, &fields); err != nil {
 				t.Fatal(err)
 			}
 			for key := range fields {
-				if !slices.Contains([]string{"id", "repoUrl", "dockerfilePath", "imageRef", "status", "error"}, key) {
+				if !slices.Contains([]string{"id", "repoUrl", "dockerfilePath", "imageRef", "status", "logs", "error"}, key) {
 					t.Errorf("coordinator exposed worker container details: field %q", key)
 				}
 			}
@@ -261,25 +258,44 @@ func TestHTTPJobLifecycle(t *testing.T) {
 			if location != "/jobs/"+created.ID {
 				t.Fatalf("Location = %q, want /jobs/%s", location, created.ID)
 			}
-			request, err = http.NewRequestWithContext(ctx, http.MethodGet, server.URL+location, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			response, err = server.Client().Do(request)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer response.Body.Close()
-			if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "application/json" {
-				t.Fatalf("GET response = %s, headers=%v", response.Status, response.Header)
-			}
 			var fetched job.Job
-			if err := json.NewDecoder(response.Body).Decode(&fetched); err != nil {
-				t.Fatal(err)
+			for {
+				request, err = http.NewRequestWithContext(ctx, http.MethodGet, server.URL+location, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				response, err = server.Client().Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "application/json" {
+					response.Body.Close()
+					t.Fatalf("GET response = %s, headers=%v", response.Status, response.Header)
+				}
+				err = json.NewDecoder(response.Body).Decode(&fetched)
+				response.Body.Close()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if fetched.Status == job.StatusCompleted || fetched.Status == job.StatusFailed {
+					break
+				}
+				select {
+				case <-time.After(10 * time.Millisecond):
+				case <-ctx.Done():
+					t.Fatal("job did not reach a terminal status")
+				}
 			}
 			stored, err := store.Get(ctx, created.ID)
-			if err != nil || fetched != created.Job || *stored != fetched {
-				t.Fatalf("POST/GET/store disagree: created=%+v fetched=%+v stored=%+v err=%v", created.Job, fetched, stored, err)
+			if err != nil || fetched.ID != created.ID || fetched.RepoURL != created.RepoURL || fetched.DockerfilePath != created.DockerfilePath || fetched.ImageRef != imageRef || fetched.Status != test.wantStatus || *stored != fetched {
+				t.Fatalf("completed GET/store disagree: created=%+v fetched=%+v stored=%+v err=%v", created.Job, fetched, stored, err)
+			}
+			logSuffix := fmt.Sprintf(" [%s] container output", created.ID)
+			logLine := strings.TrimSuffix(fetched.Logs, "\n")
+			if !strings.HasSuffix(logLine, logSuffix) {
+				t.Errorf("stored log = %q, want timestamp followed by %q", fetched.Logs, logSuffix)
+			} else if _, err := time.Parse("2006/01/02 15:04:05", strings.TrimSuffix(logLine, logSuffix)); err != nil {
+				t.Errorf("stored log timestamp = %q: %v", fetched.Logs, err)
 			}
 			if len(buildIDs) != 1 || len(dispatches) != 1 || len(logEntries) != 1 {
 				t.Fatalf("build/dispatch/log counts = %d/%d/%d, want 1/1/1", len(buildIDs), len(dispatches), len(logEntries))

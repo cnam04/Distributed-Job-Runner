@@ -26,6 +26,7 @@ func main() {
 func run(addr string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	log.SetOutput(os.Stdout)
 	apiClient, err := client.New(client.FromEnv)
 	if err != nil {
 		return err

@@ -26,6 +26,15 @@ registry repository. The server no longer reads a working-directory-relative
 `.env` file; export credentials before starting each process. For a remote
 worker, change `-worker-url` to its reachable HTTP address.
 
+Run the demo client from `client/`; its dev server proxies API requests to the
+coordinator:
+
+```sh
+npm run dev
+# For a coordinator on another machine:
+COORDINATOR_URL=http://coordinator-host:3000 npm run dev
+```
+
 ```sh
 curl -i http://localhost:3000/jobs \
   -H 'Content-Type: application/json' \
@@ -34,18 +43,15 @@ curl -i http://localhost:3000/jobs \
 curl http://localhost:3000/jobs/<job-id>
 ```
 
-`POST /jobs` runs synchronously and returns `201` with the completed job, or
-`500` with the failed job and an `error` message. The response includes a
-`Location: /jobs/<job-id>` header. Invalid submissions return `400`.
-`GET /jobs/{id}` returns the current job or `404`.
-As soon as a job is stored, the coordinator logs `Job queued: id=<job-id>`;
-use that ID from another terminal to query the job while the POST is running.
+`POST /jobs` returns `201` with the queued job and starts execution in the
+background. The response includes a `Location: /jobs/<job-id>` header. Invalid
+submissions return `400`. `GET /jobs/{id}` returns the current job or `404`.
 
-`POST /jobs/run` on the worker accepts only `jobId` and `imageRef`. It responds
-with `204` after execution and cleanup succeed, or `500` on failure. This keeps
-completion reporting on the existing request instead of introducing callbacks.
-Client disconnects and process shutdown cancel execution; container cleanup
-uses a separate, bounded context so cancellation does not leave it running.
+`POST /jobs/run` on the worker accepts only `jobId` and `imageRef`. It streams
+newline-delimited JSON log events, followed by a `done` or `error` event. The
+coordinator keeps those logs in memory for `GET /jobs/{id}`.
+Coordinator shutdown and coordinator-worker disconnects cancel execution;
+container cleanup uses a separate, bounded context.
 
 ## Test
 
@@ -68,9 +74,8 @@ token variables. They push and delete real test images in GHCR.
 
 - Job state is in-memory, unbounded, and lost on restart.
 - One worker and one container per job; no scheduler, chunks, retries, or queue.
-- Logs go to the worker console, not the coordinator or a database.
+- Logs go to worker standard output and the coordinator's in-memory job record.
 - Images remain on their Docker hosts and in GHCR; image retention is not implemented.
 - Source archives may contain regular files and directories, not symlinks or special files.
-- Requests remain open for the full job; no asynchronous submission protocol.
 - No inter-server authentication or sandboxing: use only trusted repositories
   on trusted networks. Untrusted Dockerfiles require an isolated, rootless build host.

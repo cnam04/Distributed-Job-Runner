@@ -71,7 +71,7 @@ And asynchronously it should:
 - update the job status
 
 **On the client side:**
-After submitting the post request, the client should be redirected to a monitoring dashboard for the newly-created job. For now, all this dashboard will contain is the current status of the job ("in progress", "success", "failure"), as well as the stdout, stderr output from running the job. 
+After submitting the post request, the client is redirected to a monitoring dashboard for the newly-created job. For this demo, the dashboard polls the current pipeline status while stdout and stderr are printed by the worker process.
 - For now, this data will be collected through simple repeated polling of an endpoint like GET /jobs/{id}. No websocket or sse until it works.
 
 
@@ -106,7 +106,6 @@ sequence -> the order of the log messages, so that jobs can be easily sorted thr
 - _React:_ wide component support, easy to use with changing states
 - _SQLite:_ Not much data is being stored, and the biggest priority here is just to have a fast and simple way to query and update state data by eliminating the need for a separate database server. Anything else would be overkill
 - _Golang:_ The system will need to manage many concurrent operations like HTTP requests, job execution, log/health monitoring, and distributed workers. Goroutines make concurrent I/O heavy work simple and straightforward without sacrificing performance. 
-
 
 
 

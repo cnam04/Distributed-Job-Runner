@@ -1,6 +1,51 @@
+import { useEffect, useState } from 'react'
 import SiteHeader from '../components/SiteHeader.tsx'
 
+type JobStatus = 'queued' | 'cloning' | 'building' | 'running' | 'completed' | 'failed'
+
+type Job = {
+  id: string
+  repoUrl: string
+  dockerfilePath: string
+  imageRef: string
+  status: JobStatus
+  logs: string
+}
+
+const pipeline: JobStatus[] = ['queued', 'cloning', 'building', 'running', 'completed']
+
 export default function JobPage() {
+  const id = decodeURIComponent(window.location.pathname.slice('/jobs/'.length))
+  const [job, setJob] = useState<Job | null>(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let timer = 0
+    let stopped = false
+    async function poll() {
+      try {
+        const response = await fetch(`/api/jobs/${encodeURIComponent(id)}`)
+        if (!response.ok) throw new Error((await response.text()) || 'Could not load job')
+        const nextJob = await response.json() as Job
+        if (stopped) return
+        setJob(nextJob)
+        if (nextJob.status !== 'completed' && nextJob.status !== 'failed') {
+          timer = window.setTimeout(poll, 1000)
+        }
+      } catch (error) {
+        if (!stopped) setError(error instanceof Error ? error.message : 'Could not load job')
+      }
+    }
+    void poll()
+    return () => {
+      stopped = true
+      window.clearTimeout(timer)
+    }
+  }, [id])
+
+  const currentStep = job ? pipeline.indexOf(job.status) : -1
+  const title = job?.repoUrl.split('/').filter(Boolean).at(-1) ?? 'Loading job'
+
   return (
     <div className="app-shell">
       <SiteHeader current="job" />
@@ -9,27 +54,34 @@ export default function JobPage() {
         <div className="job-title-row">
           <div>
             <a className="back-link" href="/">&lt;- All jobs</a>
-            <p className="eyebrow">Job / demo-job-42</p>
-            <h1 className="title is-2">image-preprocessor</h1>
+            <p className="eyebrow">Job / {id}</p>
+            <h1 className="title is-2">{title}</h1>
           </div>
-          <div className="running-badge"><span /> Running</div>
+          <div className="running-badge"><span /> {job?.status ?? 'loading'}</div>
         </div>
+
+        {error && <div className="notification is-danger" role="alert">{error}</div>}
 
         <section className="box status-card" aria-labelledby="progress-heading">
           <div className="status-card-heading">
             <div>
               <p className="eyebrow">Current stage</p>
-              <h2 className="title is-4" id="progress-heading">Processing workload</h2>
+              <h2 className="title is-4" id="progress-heading">{job ? job.status : 'Loading status'}</h2>
             </div>
-            <p className="elapsed"><span>Elapsed</span> 00:04:18</p>
+            <p className="elapsed">Updates every second because I'm just polling for now</p>
           </div>
 
           <div className="pipeline">
-            <div className="pipeline-step is-complete"><span>1</span><p>Queued<small>10:32:04</small></p></div>
-            <div className="pipeline-step is-complete"><span>2</span><p>Cloning<small>10:32:07</small></p></div>
-            <div className="pipeline-step is-complete"><span>3</span><p>Building<small>10:32:19</small></p></div>
-            <div className="pipeline-step is-active"><span>4</span><p>Running<small>10:33:51</small></p></div>
-            <div className="pipeline-step"><span>5</span><p>Complete<small>Pending</small></p></div>
+            {pipeline.map((status, index) => {
+              const complete = job?.status === 'completed' || currentStep > index
+              const active = currentStep === index
+              return (
+                <div className={`pipeline-step${complete ? ' is-complete' : ''}${active ? ' is-active' : ''}`} key={status}>
+                  <span>{index + 1}</span>
+                  <p>{status}<small>{complete ? 'Done' : active ? 'Current' : 'Pending'}</small></p>
+                </div>
+              )
+            })}
           </div>
         </section>
 
@@ -39,27 +91,20 @@ export default function JobPage() {
               <div className="terminal-bar">
                 <div className="terminal-dots" aria-hidden="true"><i /><i /><i /></div>
                 <p>Live output</p>
-                <span>stdout</span>
+                <span>stdout + stderr</span>
               </div>
-              <pre aria-label="Standard output"><code><b>10:33:51</b>  Container started on worker-03{`\n`}<b>10:33:52</b>  Found 50,000 images in /data/input{`\n`}<b>10:33:52</b>  Splitting input into 50 chunks{`\n`}<b>10:33:54</b>  [########------------] chunk 21/50{`\n`}<b>10:35:17</b>  Processed 21,000 / 50,000 images{`\n`}<b>10:36:22</b>  [############--------] chunk 31/50{`\n`}<span className="terminal-cursor"> </span></code></pre>
+              <pre aria-label="Worker output"><code>{job?.logs || 'Waiting for worker output...\n'}{job?.status !== 'completed' && job?.status !== 'failed' && <span className="terminal-cursor"> </span>}</code></pre>
             </div>
-
-            <details className="stderr-panel">
-              <summary>stderr <span>0 messages</span></summary>
-              <p>No error output has been reported.</p>
-            </details>
           </section>
 
           <aside className="column is-4" aria-label="Job details">
             <div className="box details-card">
               <p className="eyebrow">Job details</p>
               <dl>
-                <div><dt>Repository</dt><dd><a href="https://github.com/student/image-preprocessor">student/image-preprocessor</a></dd></div>
-                <div><dt>Dockerfile</dt><dd><code>./Dockerfile</code></dd></div>
-                <div><dt>Command</dt><dd><code>python process.py /data/input</code></dd></div>
-                <div><dt>Created</dt><dd>Today, 10:32 AM</dd></div>
-                <div><dt>Worker</dt><dd>worker-03</dd></div>
-              </dl>
+                <div><dt>Repository</dt><dd>{job ? <a href={job.repoUrl}>{job.repoUrl}</a> : 'Loading'}</dd></div>
+                <div><dt>Dockerfile</dt><dd><code>{job?.dockerfilePath ?? 'Loading'}</code></dd></div>
+                <div><dt>Image</dt><dd><code>{job?.imageRef || 'Pending'}</code></dd></div>
+               </dl>
             </div>
           </aside>
         </div>

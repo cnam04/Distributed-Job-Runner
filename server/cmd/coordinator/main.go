@@ -40,11 +40,13 @@ func run(addr, workerURL string) error {
 		return err
 	}
 	defer apiClient.Close()
+	jobs := coordinator.NewMemoryJobStore()
 	service := &coordinator.Service{
-		NewRepo: func() coordinator.RepoFetcher { return &gitservice.JobRepo{} },
-		Images:  &dockerservice.Builder{ApiClient: apiClient},
-		Workers: &workerhttp.Client{URL: workerURL, HTTP: &http.Client{}},
-		Jobs:    coordinator.NewMemoryJobStore(),
+		NewRepo:    func() coordinator.RepoFetcher { return &gitservice.JobRepo{} },
+		Images:     &dockerservice.Builder{ApiClient: apiClient},
+		Workers:    &workerhttp.Client{URL: workerURL, HTTP: &http.Client{}, Log: jobs.AppendLog},
+		Jobs:       jobs,
+		RunContext: ctx,
 	}
 	log.Printf("Coordinator listening on %s, worker %s", addr, workerURL)
 	return transport.Serve(ctx, addr, coordinatorhttp.NewHandler(service))

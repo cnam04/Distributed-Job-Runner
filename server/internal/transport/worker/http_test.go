@@ -101,8 +101,8 @@ func TestWorkerServiceError(t *testing.T) {
 	runner := &fakeRunner{failure: errors.New("pull denied")}
 	response := httptest.NewRecorder()
 	NewHandler(&worker.Service{Runner: runner}).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/jobs/run", strings.NewReader(validSpecJSON)))
-	if response.Code != http.StatusInternalServerError || response.Body.String() != "pull denied\n" {
-		t.Errorf("response = %d %q, want 500 with service error", response.Code, response.Body.String())
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "application/x-ndjson" || response.Body.String() != "{\"error\":\"pull denied\"}\n" {
+		t.Errorf("response = %d %q, want streamed service error", response.Code, response.Body.String())
 	}
 	if !slices.Equal(runner.calls, []string{"pull"}) {
 		t.Errorf("calls after service failure = %v, want [pull]", runner.calls)
@@ -116,8 +116,9 @@ func TestClientResponses(t *testing.T) {
 		body    string
 		message string
 	}{
-		{"completed", http.StatusNoContent, "", ""},
-		{"OK is not completion", http.StatusOK, "not completed", "not completed"},
+		{"completed", http.StatusOK, "{\"done\":true}\n", ""},
+		{"stream ended", http.StatusOK, "{\"line\":\"partial\"}\n", "worker stream ended before completion"},
+		{"streamed failure", http.StatusOK, "{\"error\":\"container exited with status 17\"}\n", "container exited with status 17"},
 		{"created is not completion", http.StatusCreated, "created", "created"},
 		{"accepted is not completion", http.StatusAccepted, "accepted", "accepted"},
 		{"bad request", http.StatusBadRequest, "invalid spec", "invalid spec"},
@@ -141,9 +142,15 @@ func TestClientResponses(t *testing.T) {
 			defer server.Close()
 			client := Client{URL: server.URL + "///", HTTP: server.Client()}
 			err := client.Run(t.Context(), testSpec)
-			if test.status == http.StatusNoContent {
+			if test.message == "" {
 				if err != nil {
 					t.Fatal(err)
+				}
+				return
+			}
+			if test.status == http.StatusOK {
+				if err == nil || err.Error() != test.message {
+					t.Errorf("Run error = %v, want %q", err, test.message)
 				}
 				return
 			}
@@ -152,6 +159,28 @@ func TestClientResponses(t *testing.T) {
 				t.Errorf("Run error = %v, want %q", err, want)
 			}
 		})
+	}
+}
+
+func TestClientStreamsLogs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		io.WriteString(w, "{\"line\":\"first\"}\n{\"line\":\"\"}\n{\"done\":true}\n")
+	}))
+	defer server.Close()
+	var logs []string
+	client := Client{URL: server.URL, HTTP: server.Client(), Log: func(_ context.Context, jobID, line string) error {
+		if jobID != testSpec.JobID {
+			t.Errorf("log job ID = %q, want %q", jobID, testSpec.JobID)
+		}
+		logs = append(logs, line)
+		return nil
+	}}
+	if err := client.Run(t.Context(), testSpec); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(logs, []string{"first", ""}) {
+		t.Errorf("streamed logs = %q", logs)
 	}
 }
 
