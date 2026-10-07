@@ -4,3 +4,4 @@ testjobs/
 
 .env
 .env.swp
+.DS_store
