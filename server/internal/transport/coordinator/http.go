@@ -48,6 +48,7 @@ func (handler *handler) handleSubmitJob(w http.ResponseWriter, r *http.Request) 
 		RepoURL        string `json:"repoUrl"`
 		DockerfilePath string `json:"dockerfilePath"`
 	}
+	// parse request
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 	if err != nil || json.Unmarshal(body, &request) != nil {
 		http.Error(w, "invalid job JSON", http.StatusBadRequest)
@@ -61,8 +62,15 @@ func (handler *handler) handleSubmitJob(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "dockerfilePath must be repository-relative", http.StatusBadRequest)
 		return
 	}
-	j := job.Job{ID: rand.Text(), RepoURL: request.RepoURL, DockerfilePath: request.DockerfilePath}
+
+	// instantiate and submit job
+	j := job.Job{
+		ID:             rand.Text(),
+		RepoURL:        request.RepoURL,
+		DockerfilePath: request.DockerfilePath}
 	err = handler.service.Submit(r.Context(), &j)
+
+	// response
 	status := http.StatusCreated
 	message := ""
 	if err != nil {

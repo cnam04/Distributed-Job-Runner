@@ -32,8 +32,9 @@ type JobStore interface {
 }
 
 type Service struct {
-	NewRepo    func() RepoFetcher
-	Images     ImageBuilder
+	NewRepo func() RepoFetcher
+	Images  ImageBuilder
+	// current worker pool refers to one singular worker rather than an array of workers
 	Workers    WorkerClient
 	Jobs       JobStore
 	RunContext context.Context
@@ -47,6 +48,7 @@ func (s *Service) create(ctx context.Context, j *job.Job) error {
 		return err
 	}
 	j.Status = job.StatusQueued
+	// Add the job to the memory store
 	if err := s.Jobs.Create(ctx, j); err != nil {
 		return err
 	}
@@ -62,6 +64,8 @@ func (s *Service) Submit(ctx context.Context, j *job.Job) error {
 	if runCtx == nil {
 		runCtx = context.Background()
 	}
+
+	// immediately asynchronously execute the coordinator aspect of the job
 	backgroundJob := *j
 	go func() {
 		if err := s.execute(runCtx, &backgroundJob); err != nil {
@@ -92,6 +96,8 @@ func (s *Service) execute(ctx context.Context, j *job.Job) (err error) {
 			err = errors.Join(err, s.setStatus(stateCtx, j, job.StatusFailed))
 		}
 	}()
+
+	// set the status of the job in the store
 	if err = s.setStatus(ctx, j, job.StatusCloning); err != nil {
 		return err
 	}
@@ -116,6 +122,8 @@ func (s *Service) execute(ctx context.Context, j *job.Job) (err error) {
 	if err = s.setStatus(ctx, j, job.StatusRunning); err != nil {
 		return err
 	}
+
+	// Immediately run the job on any workers (no scheduling)
 	return s.Workers.Run(ctx, job.JobSpec{JobID: j.ID, ImageRef: j.ImageRef})
 }
 

@@ -63,7 +63,6 @@ func NewHandler(service *worker.Service) http.Handler {
 	return mux
 }
 
-// ponytail: one worker and synchronous completion; add scheduling and async callbacks when jobs outlive HTTP requests.
 type Client struct {
 	URL  string
 	HTTP *http.Client

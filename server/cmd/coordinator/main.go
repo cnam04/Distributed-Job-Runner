@@ -42,8 +42,9 @@ func run(addr, workerURL string) error {
 	defer apiClient.Close()
 	jobs := coordinator.NewMemoryJobStore()
 	service := &coordinator.Service{
-		NewRepo:    func() coordinator.RepoFetcher { return &gitservice.JobRepo{} },
-		Images:     &dockerservice.Builder{ApiClient: apiClient},
+		NewRepo: func() coordinator.RepoFetcher { return &gitservice.JobRepo{} },
+		Images:  &dockerservice.Builder{ApiClient: apiClient},
+		// currently, Workers refers to a singlar worker client that is hardcoded
 		Workers:    &workerhttp.Client{URL: workerURL, HTTP: &http.Client{}, Log: jobs.AppendLog},
 		Jobs:       jobs,
 		RunContext: ctx,
