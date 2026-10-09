@@ -76,6 +76,7 @@ func (s *Service) Run(ctx context.Context, spec job.JobSpec) (err error) {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	logErrors := make(chan error, 1)
+	// async logging using logsink function
 	go func() {
 		logErr := s.Runner.Logs(runCtx, containerID, spec.JobID, s.Logs)
 		if logErr != nil {

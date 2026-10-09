@@ -35,7 +35,7 @@ type Service struct {
 	NewRepo func() RepoFetcher
 	Images  ImageBuilder
 	// current worker pool refers to one singular worker rather than an array of workers
-	Workers    WorkerClient
+	Workers    []WorkerClient
 	Jobs       JobStore
 	RunContext context.Context
 }
@@ -123,8 +123,16 @@ func (s *Service) execute(ctx context.Context, j *job.Job) (err error) {
 		return err
 	}
 
-	// Immediately run the job on any workers (no scheduling)
-	return s.Workers.Run(ctx, job.JobSpec{JobID: j.ID, ImageRef: j.ImageRef})
+	// Immediately run the job on any workers (no worker scheduling) (no job queue) (synchronous)
+	var errs []error
+	for i, worker := range s.Workers {
+		if err = worker.Run(ctx, job.JobSpec{JobID: j.ID, ImageRef: j.ImageRef}); err != nil {
+			errs = append(errs, err)
+		} else {
+			log.Printf("[Worker: %d] Job: %s Complete", i, j.ID)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (s *Service) setStatus(ctx context.Context, j *job.Job, status job.Status) error {

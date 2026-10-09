@@ -14,25 +14,30 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/moby/moby/client"
 )
 
 func main() {
-	addr := flag.String("addr", ":3000", "coordinator HTTP address")
-	workerURL := flag.String("worker-url", "http://localhost:8081", "worker HTTP URL")
+	coordinatorAddrInput := flag.String("addr", ":3000", "coordinator HTTP address")
+	workerURLInput := flag.String(
+		"worker-url",
+		"http://localhost:8081",
+		"worker HTTP URL. For many, separate with a comma. Ex: (http://localhost:8081,http://localhost:8082,http://localhost:8083)",
+	)
 	flag.Parse()
-	u, err := url.Parse(*workerURL)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		log.Fatal("worker-url must be an HTTP base URL")
-	}
-	if err := run(*addr, *workerURL); err != nil {
+
+	// get all worker addresses
+	workerUrls := parseWorkers(workerURLInput)
+
+	if err := run(*coordinatorAddrInput, workerUrls); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func run(addr, workerURL string) error {
+func run(addr string, workerURLs []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	apiClient, err := client.New(client.FromEnv)
@@ -45,10 +50,40 @@ func run(addr, workerURL string) error {
 		NewRepo: func() coordinator.RepoFetcher { return &gitservice.JobRepo{} },
 		Images:  &dockerservice.Builder{ApiClient: apiClient},
 		// currently, Workers refers to a singlar worker client that is hardcoded
-		Workers:    &workerhttp.Client{URL: workerURL, HTTP: &http.Client{}, Log: jobs.AppendLog},
+		Workers:    newWorkers(workerURLs, jobs),
 		Jobs:       jobs,
 		RunContext: ctx,
 	}
-	log.Printf("Coordinator listening on %s, worker %s", addr, workerURL)
+	log.Printf("Coordinator listening on %s", addr)
+	for i, url := range workerURLs {
+		log.Printf("Worker %d: %s ", i, url)
+	}
+	log.Println()
+
 	return transport.Serve(ctx, addr, coordinatorhttp.NewHandler(service))
+}
+
+func newWorkers(workerUrls []string, jobs *coordinator.MemoryJobStore) []coordinator.WorkerClient {
+	var workerClients []coordinator.WorkerClient
+	for _, url := range workerUrls {
+		workerClients = append(workerClients, &workerhttp.Client{
+			URL:  url,
+			HTTP: &http.Client{},
+			Log:  jobs.AppendLog,
+		})
+	}
+	return workerClients
+}
+
+func parseWorkers(urlList *string) []string {
+	workerUrls := strings.Split(*urlList, ",")
+
+	for _, w := range workerUrls {
+		u, err := url.Parse(w)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+			log.Fatal("worker-url must be an HTTP base URL")
+		}
+	}
+
+	return workerUrls
 }

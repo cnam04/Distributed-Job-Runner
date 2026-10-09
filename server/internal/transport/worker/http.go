@@ -14,6 +14,7 @@ import (
 	"time"
 )
 
+// satisfies the LogSink interface for the worker logs
 type logSinkFunc func(context.Context, string, string) error
 
 func (f logSinkFunc) Write(ctx context.Context, jobID, line string) error {
@@ -37,22 +38,28 @@ func NewHandler(service *worker.Service) http.Handler {
 		}
 		encoder := json.NewEncoder(w)
 		runService := *service
+		// implementation of the worker logSink. It prints logs to stdout AND streams them to Coordinator
 		runService.Logs = logSinkFunc(func(ctx context.Context, jobID, line string) error {
 			if service.Logs != nil {
+				// use the ConsoleLogSink Write implementation
 				if err := service.Logs.Write(ctx, jobID, line); err != nil {
 					return err
 				}
 			}
+			// write to http response body
 			lineCopy := fmt.Sprintf("%s [%s] %s", time.Now().Format("2006/01/02 15:04:05"), jobID, line)
 			if err := encoder.Encode(job.LogEvent{Line: &lineCopy}); err != nil {
 				return err
 			}
+			// send through the connection
 			if flusher != nil {
 				flusher.Flush()
 			}
 			return nil
 		})
 		event := job.LogEvent{Done: true}
+
+		// run call the worker service run method for the current job
 		if err := runService.Run(r.Context(), spec); err != nil {
 			event = job.LogEvent{Error: err.Error()}
 		}
@@ -63,6 +70,7 @@ func NewHandler(service *worker.Service) http.Handler {
 	return mux
 }
 
+// Client
 type Client struct {
 	URL  string
 	HTTP *http.Client
@@ -70,15 +78,23 @@ type Client struct {
 }
 
 func (c *Client) Run(ctx context.Context, spec job.JobSpec) error {
+	// build jobspec into api req format
 	body, err := json.Marshal(spec)
 	if err != nil {
 		return err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(c.URL, "/")+"/jobs/run", bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		strings.TrimRight(c.URL, "/")+"/jobs/run",
+		bytes.NewReader(body),
+	)
 	if err != nil {
 		return err
 	}
 	request.Header.Set("Content-Type", "application/json")
+
+	// synchronously send api request to the worker
 	response, err := c.HTTP.Do(request)
 	if err != nil {
 		return fmt.Errorf("dispatch job: %w", err)
@@ -91,6 +107,8 @@ func (c *Client) Run(ctx context.Context, spec job.JobSpec) error {
 		}
 		return fmt.Errorf("worker returned %s: %s", response.Status, strings.TrimSpace(string(message)))
 	}
+
+	// read responses through the post response untl job is finished
 	decoder := json.NewDecoder(response.Body)
 	for {
 		var event job.LogEvent
@@ -101,7 +119,9 @@ func (c *Client) Run(ctx context.Context, spec job.JobSpec) error {
 			return fmt.Errorf("read worker response: %w", err)
 		}
 		if event.Line != nil && c.Log != nil {
-			if err := c.Log(ctx, spec.JobID, *event.Line); err != nil {
+			// log the response
+			err := c.Log(ctx, spec.JobID, *event.Line)
+			if err != nil {
 				return fmt.Errorf("store worker log: %w", err)
 			}
 		}
