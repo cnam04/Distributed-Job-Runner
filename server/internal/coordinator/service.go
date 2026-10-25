@@ -165,10 +165,22 @@ func (s *Service) ManageTasks(ctx context.Context, j *job.Job) error {
 	}
 
 	var wg sync.WaitGroup
-
+	var workerIdx int
 	for _, task := range tasks {
 		// wait for a free worker if all workers are running a task (1 task per worker for now)
-		workerIdx := <-availableWorkers
+		select {
+		case <-ctx.Done():
+			// allow running tasks to finish
+			wg.Wait()
+			// Drain the errors from the channel back into your slice safely
+			for err := range errChan {
+				errs = append(errs, err)
+			}
+			// Add context error to errors
+			errs = append(errs, ctx.Err())
+			return errors.Join(errs...)
+		case workerIdx = <-availableWorkers:
+		}
 
 		wg.Add(1)
 
