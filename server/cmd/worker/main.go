@@ -35,6 +35,7 @@ func run(addr string) error {
 	service := &worker.Service{
 		Runner: &dockerservice.Runner{ApiClient: apiClient},
 		Logs:   worker.ConsoleLogSink{},
+		Tasks:  worker.NewWorkerStatusStore(),
 	}
 	log.Printf("Worker listening on %s", addr)
 	return transport.Serve(ctx, addr, workerhttp.NewHandler(service))

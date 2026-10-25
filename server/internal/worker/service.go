@@ -45,6 +45,14 @@ func (ConsoleLogSink) Write(ctx context.Context, jobID, line string) error {
 type Service struct {
 	Runner ContainerRunner
 	Logs   LogSink
+	Tasks  TaskStore
+}
+
+type TaskStore interface {
+	Create(ctx context.Context, t *job.Task) error
+	UpdateStatus(ctx context.Context, taskID string, status job.TaskStatus) error
+	AppendLog(ctx context.Context, taskID, line string) error
+	Get(ctx context.Context, taskID string) (*job.Task, error)
 }
 
 func (s *Service) Run(ctx context.Context, spec job.JobSpec) (err error) {

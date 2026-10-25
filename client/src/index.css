@@ -453,7 +453,9 @@ a {
 
 .terminal {
   overflow: hidden;
-  min-height: 380px;
+  height: clamp(380px, 60vh, 600px);
+  display: flex;
+  flex-direction: column;
   border: 1px solid #17466f;
   border-radius: 4px;
   background: #001225;
@@ -498,6 +500,8 @@ a {
   margin: 0;
   padding: 1.4rem;
   overflow: auto;
+  min-height: 0;
+  flex: 1;
   color: #aeb8b1;
   background: transparent;
   font: 0.75rem/2 "SFMono-Regular", Consolas, "Liberation Mono", monospace;

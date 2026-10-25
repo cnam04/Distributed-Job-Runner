@@ -59,7 +59,8 @@ func NewHandler(service *worker.Service) http.Handler {
 		})
 		event := job.LogEvent{Done: true}
 
-		// run call the worker service run method for the current job
+		// call the worker service run method for the current job
+		//  logs are streamed back through http
 		if err := runService.Run(r.Context(), spec); err != nil {
 			event = job.LogEvent{Error: err.Error()}
 		}
@@ -119,7 +120,7 @@ func (c *Client) Run(ctx context.Context, spec job.JobSpec) error {
 			return fmt.Errorf("read worker response: %w", err)
 		}
 		if event.Line != nil && c.Log != nil {
-			// log the response
+			// append the log line to the coordinator log store for that job
 			err := c.Log(ctx, spec.JobID, *event.Line)
 			if err != nil {
 				return fmt.Errorf("store worker log: %w", err)

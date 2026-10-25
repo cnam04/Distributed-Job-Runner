@@ -93,7 +93,11 @@ export default function JobPage() {
                 <p>Live output</p>
                 <span>stdout + stderr</span>
               </div>
-              <pre aria-label="Worker output"><code>{job?.logs || 'Waiting for worker output...\n'}{job?.status !== 'completed' && job?.status !== 'failed' && <span className="terminal-cursor"> </span>}</code></pre>
+              <pre aria-label="Worker output">
+                <code>
+                  {job?.logs || 'Waiting for worker output...\n'}{job?.status !== 'completed' && job?.status !== 'failed' && <span className="terminal-cursor"> </span>}
+                </code>
+              </pre>
             </div>
           </section>
 
