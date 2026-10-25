@@ -6,7 +6,10 @@ import (
 	"errors"
 	"log"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type RepoFetcher interface {
@@ -123,19 +126,95 @@ func (s *Service) execute(ctx context.Context, j *job.Job) (err error) {
 		return err
 	}
 
-	// Immediately run the job on any workers (no worker scheduling) (no job queue) (synchronous)
-	var errs []error
-	for i, worker := range s.Workers {
-		if err = worker.Run(ctx, job.JobSpec{JobID: j.ID, ImageRef: j.ImageRef}); err != nil {
-			errs = append(errs, err)
-		} else {
-			log.Printf("[Worker: %d] Job: %s Complete", i, j.ID)
-		}
+	// Split job into tasks and run
+	if err := s.ManageTasks(ctx, j); err != nil {
+		return err
 	}
-	return errors.Join(errs...)
+
+	return nil
 }
 
 func (s *Service) setStatus(ctx context.Context, j *job.Job, status job.Status) error {
 	j.Status = status
 	return s.Jobs.UpdateStatus(ctx, j.ID, status)
+}
+
+// Split jobs into tasks, schedule workers, track execution, etc.
+// main method for runtime task management per job.
+func (s *Service) ManageTasks(ctx context.Context, j *job.Job) error {
+	// TODO: Replace with real job->[]task logic
+	// Create all of the tasks
+	var tasks = []job.Task{}
+	var ARBITRARY_NUMBER_OF_TASKS_REPLACE_LATER = 9
+	for range ARBITRARY_NUMBER_OF_TASKS_REPLACE_LATER {
+		tasks = append(tasks, s.CreateTask(ctx, j))
+	}
+
+	// Schedule tasks to Non-busy workers.
+	// TODO: More efficient scheduling logic
+	var errs []error
+	currWorker := 0
+
+	// Buffering it to the number of tasks ensures goroutines never get blocked writing to it
+	errChan := make(chan error, len(tasks))
+
+	// Create a buffered channel of workers
+	availableWorkers := make(chan int, len(s.Workers))
+	for i := range s.Workers {
+		availableWorkers <- i
+	}
+
+	var wg sync.WaitGroup
+
+	for _, task := range tasks {
+		// wait for a free worker if all workers are running a task (1 task per worker for now)
+		workerIdx := <-availableWorkers
+
+		wg.Add(1)
+
+		// Launch the goroutine
+		// Pass task and currWorker as parameters to avoid loop variable capture bugs
+		go func(t job.Task, workerIdx int) {
+			defer wg.Done()
+			// add the worker back to the pool when it's done with the current task
+			defer func() {
+				availableWorkers <- workerIdx
+			}()
+
+			// Run the task synchronously inside this specific goroutine
+			err := s.Workers[workerIdx].Run(ctx, job.JobSpec{JobID: t.JobID, ImageRef: t.ImageRef})
+
+			if err != nil {
+				errChan <- err // Send the error to the channel
+			} else {
+				log.Printf("[Worker: %d] Job %s | Task %s Complete,", workerIdx, t.JobID, t.ID)
+			}
+		}(task, workerIdx) // <-- Variables are copied into the parameters safely here
+
+		currWorker = (currWorker + 1) % len(s.Workers)
+	}
+
+	// Wait for all goroutines to finish in the background, then close the channel
+	wg.Wait()
+	close(errChan)
+	close(availableWorkers)
+
+	// Drain the errors from the channel back into your slice safely
+	for err := range errChan {
+		errs = append(errs, err)
+	}
+
+	return errors.Join(errs...)
+
+}
+
+// Create a task from job. For now, just creates a task that is a job. Will later divide the job into tasks
+func (s *Service) CreateTask(ctx context.Context, j *job.Job) job.Task {
+	return job.Task{
+		ID:       uuid.New().String(),
+		JobID:    j.ID,
+		ImageRef: j.ImageRef,
+		Status:   job.TaskPending,
+		Logs:     "",
+	}
 }
