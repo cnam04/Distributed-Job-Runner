@@ -30,7 +30,8 @@ type JobStore interface {
 	Create(ctx context.Context, j *job.Job) error
 	UpdateStatus(ctx context.Context, jobID string, status job.Status) error
 	SetImageRef(ctx context.Context, jobID, imageRef string) error
-	AppendLog(ctx context.Context, jobID, line string) error
+	AssignTask(ctx context.Context, jobID string, workerID int, taskID string) error
+	AppendLog(ctx context.Context, jobID string, workerID int, taskID, line string) error
 	Get(ctx context.Context, jobID string) (*job.Job, error)
 }
 
@@ -51,6 +52,10 @@ func (s *Service) create(ctx context.Context, j *job.Job) error {
 		return err
 	}
 	j.Status = job.StatusQueued
+	j.WorkerLogs = make([]job.WorkerLog, len(s.Workers))
+	for workerID := range s.Workers {
+		j.WorkerLogs[workerID] = job.WorkerLog{WorkerID: workerID, Tasks: []job.TaskLog{}}
+	}
 	// Add the job to the memory store
 	if err := s.Jobs.Create(ctx, j); err != nil {
 		return err
@@ -193,8 +198,13 @@ func (s *Service) ManageTasks(ctx context.Context, j *job.Job) error {
 				availableWorkers <- workerIdx
 			}()
 
+			if err := s.Jobs.AssignTask(ctx, t.JobID, workerIdx, t.ID); err != nil {
+				errChan <- err
+				return
+			}
+
 			// Run the task synchronously inside this specific goroutine
-			err := s.Workers[workerIdx].Run(ctx, job.JobSpec{JobID: t.JobID, ImageRef: t.ImageRef})
+			err := s.Workers[workerIdx].Run(ctx, job.JobSpec{JobID: t.JobID, TaskID: t.ID, ImageRef: t.ImageRef})
 
 			if err != nil {
 				errChan <- err // Send the error to the channel

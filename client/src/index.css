@@ -462,6 +462,35 @@ a {
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
 }
 
+.worker-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.5rem;
+}
+
+.worker-tabs button {
+  padding: 0.35rem 0.7rem;
+  border: 1px solid #17466f;
+  border-radius: 3px;
+  color: #89928c;
+  background: #001a33;
+  font: 0.68rem "SFMono-Regular", Consolas, monospace;
+  cursor: pointer;
+}
+
+.worker-tabs button:hover,
+.worker-tabs button:focus-visible {
+  border-color: #f58426;
+  color: #e8ede9;
+}
+
+.worker-tabs button.is-active {
+  border-color: #f58426;
+  color: #001f3f;
+  background: #f58426;
+}
+
 .terminal-bar {
   height: 47px;
   padding: 0 1rem;

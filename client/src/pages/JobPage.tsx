@@ -3,13 +3,23 @@ import SiteHeader from '../components/SiteHeader.tsx'
 
 type JobStatus = 'queued' | 'cloning' | 'building' | 'running' | 'completed' | 'failed'
 
+type TaskLog = {
+  taskId: string
+  logs: string
+}
+
+type WorkerLog = {
+  workerId: number
+  tasks: TaskLog[]
+}
+
 type Job = {
   id: string
   repoUrl: string
   dockerfilePath: string
   imageRef: string
   status: JobStatus
-  logs: string
+  workerLogs: WorkerLog[]
 }
 
 const pipeline: JobStatus[] = ['queued', 'cloning', 'building', 'running', 'completed']
@@ -18,6 +28,7 @@ export default function JobPage() {
   const id = decodeURIComponent(window.location.pathname.slice('/jobs/'.length))
   const [job, setJob] = useState<Job | null>(null)
   const [error, setError] = useState('')
+  const [activeWorkerId, setActiveWorkerId] = useState<number | null>(null)
 
   useEffect(() => {
     let timer = 0
@@ -45,6 +56,8 @@ export default function JobPage() {
 
   const currentStep = job ? pipeline.indexOf(job.status) : -1
   const title = job?.repoUrl.split('/').filter(Boolean).at(-1) ?? 'Loading job'
+  const activeWorker = job?.workerLogs.find(({ workerId }) => workerId === activeWorkerId) ?? job?.workerLogs[0]
+  const workerOutput = activeWorker?.tasks.map(({ taskId, logs }) => `[Task ${taskId}]\n${logs || 'Waiting for output...\n'}`).join('\n')
 
   return (
     <div className="app-shell">
@@ -87,6 +100,19 @@ export default function JobPage() {
 
         <div className="columns is-variable is-5 job-grid">
           <section className="column is-8">
+            <div className="worker-tabs" aria-label="Workers">
+              {job?.workerLogs.map(({ workerId }) => (
+                <button
+                  className={activeWorker?.workerId === workerId ? 'is-active' : ''}
+                  type="button"
+                  aria-pressed={activeWorker?.workerId === workerId}
+                  key={workerId}
+                  onClick={() => setActiveWorkerId(workerId)}
+                >
+                  Worker {workerId + 1}
+                </button>
+              ))}
+            </div>
             <div className="terminal">
               <div className="terminal-bar">
                 <div className="terminal-dots" aria-hidden="true"><i /><i /><i /></div>
@@ -95,7 +121,7 @@ export default function JobPage() {
               </div>
               <pre aria-label="Worker output">
                 <code>
-                  {job?.logs || 'Waiting for worker output...\n'}{job?.status !== 'completed' && job?.status !== 'failed' && <span className="terminal-cursor"> </span>}
+                  {workerOutput || 'Waiting for worker output...\n'}{job?.status !== 'completed' && job?.status !== 'failed' && <span className="terminal-cursor"> </span>}
                 </code>
               </pre>
             </div>

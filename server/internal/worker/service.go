@@ -56,8 +56,8 @@ type TaskStore interface {
 }
 
 func (s *Service) Run(ctx context.Context, spec job.JobSpec) (err error) {
-	if strings.TrimSpace(spec.JobID) == "" || strings.TrimSpace(spec.ImageRef) == "" {
-		return errors.New("jobId and imageRef are required")
+	if strings.TrimSpace(spec.JobID) == "" || strings.TrimSpace(spec.TaskID) == "" || strings.TrimSpace(spec.ImageRef) == "" {
+		return errors.New("jobId, taskId, and imageRef are required")
 	}
 	if err = ctx.Err(); err != nil {
 		return err

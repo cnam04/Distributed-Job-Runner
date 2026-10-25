@@ -26,8 +26,8 @@ func NewHandler(service *worker.Service) http.Handler {
 	mux.HandleFunc("POST /jobs/run", func(w http.ResponseWriter, r *http.Request) {
 		var spec job.JobSpec
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
-		if err != nil || json.Unmarshal(body, &spec) != nil || strings.TrimSpace(spec.JobID) == "" || strings.TrimSpace(spec.ImageRef) == "" {
-			http.Error(w, "jobId and imageRef are required in valid JSON", http.StatusBadRequest)
+		if err != nil || json.Unmarshal(body, &spec) != nil || strings.TrimSpace(spec.JobID) == "" || strings.TrimSpace(spec.TaskID) == "" || strings.TrimSpace(spec.ImageRef) == "" {
+			http.Error(w, "jobId, taskId, and imageRef are required in valid JSON", http.StatusBadRequest)
 			return
 		}
 		w.Header().Set("Content-Type", "application/x-ndjson")
@@ -75,7 +75,7 @@ func NewHandler(service *worker.Service) http.Handler {
 type Client struct {
 	URL  string
 	HTTP *http.Client
-	Log  func(context.Context, string, string) error
+	Log  func(context.Context, string, string, string) error
 }
 
 func (c *Client) Run(ctx context.Context, spec job.JobSpec) error {
@@ -121,7 +121,7 @@ func (c *Client) Run(ctx context.Context, spec job.JobSpec) error {
 		}
 		if event.Line != nil && c.Log != nil {
 			// append the log line to the coordinator log store for that job
-			err := c.Log(ctx, spec.JobID, *event.Line)
+			err := c.Log(ctx, spec.JobID, spec.TaskID, *event.Line)
 			if err != nil {
 				return fmt.Errorf("store worker log: %w", err)
 			}

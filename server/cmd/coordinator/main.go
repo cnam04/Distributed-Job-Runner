@@ -64,11 +64,13 @@ func run(addr string, workerURLs []string) error {
 
 func newWorkers(workerUrls []string, jobs *coordinator.MemoryJobStore) []coordinator.WorkerClient {
 	var workerClients []coordinator.WorkerClient
-	for _, url := range workerUrls {
+	for workerID, url := range workerUrls {
 		workerClients = append(workerClients, &workerhttp.Client{
 			URL:  url,
 			HTTP: &http.Client{},
-			Log:  jobs.AppendLog,
+			Log: func(ctx context.Context, jobID, taskID, line string) error {
+				return jobs.AppendLog(ctx, jobID, workerID, taskID, line)
+			},
 		})
 	}
 	return workerClients
